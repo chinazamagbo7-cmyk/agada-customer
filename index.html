@@ -32,6 +32,15 @@ button.primary,button.secondary{width:100%;height:50px;margin-top:18px;border-ra
 .hidden{display:none}
 .small-link{text-align:center;margin-top:14px}
 .small-link button{border:0;background:none;color:#a90062;font-weight:bold;font-size:14px}
+
+.plan-option{width:100%;padding:16px;margin-top:10px;border:2px solid #ddd;border-radius:12px;background:#fff;text-align:left;font-size:16px;font-weight:bold}
+.plan-option.selected{border-color:#a90062;background:#fff0f8;color:#a90062}
+.plan-small{display:block;font-size:13px;font-weight:normal;color:#666;margin-top:5px}
+.dashboard-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:15px}
+.stat{background:#f8f8f8;border-radius:12px;padding:15px}
+.stat-title{font-size:13px;color:#666}
+.stat-value{font-size:22px;font-weight:bold;color:#a90062;margin-top:6px}
+.section-title{font-size:18px;font-weight:bold;margin-top:22px}
 </style>
 </head>
 <body>
@@ -84,6 +93,34 @@ button.primary,button.secondary{width:100%;height:50px;margin-top:18px;border-ra
 
 <div class="small-link"><button id="forgotBtn">Forgot Password?</button></div>
 </section>
+<section id="planPanel" class="hidden">
+<h2>Choose Your Daily Contribution</h2>
+<p class="note">Select the amount you want to contribute every day. Your monthly commission will be the same amount.</p>
+
+<button class="plan-option" data-amount="1000">₦1,000 daily<span class="plan-small">Monthly commission: ₦1,000</span></button>
+<button class="plan-option" data-amount="1500">₦1,500 daily<span class="plan-small">Monthly commission: ₦1,500</span></button>
+<button class="plan-option" data-amount="2000">₦2,000 daily<span class="plan-small">Monthly commission: ₦2,000</span></button>
+<button class="plan-option" data-amount="5000">₦5,000 daily<span class="plan-small">Monthly commission: ₦5,000</span></button>
+<button class="plan-option" data-amount="10000">₦10,000 daily<span class="plan-small">Monthly commission: ₦10,000</span></button>
+
+<button id="continuePlanBtn" class="primary" disabled>CONTINUE TO DASHBOARD</button>
+</section>
+
+<section id="dashboardPanel" class="hidden">
+<h2>Customer Dashboard</h2>
+<p class="note">Welcome to your AGADA account.</p>
+<div class="dashboard-grid">
+<div class="stat"><div class="stat-title">Daily Contribution</div><div id="dashDaily" class="stat-value">₦0</div></div>
+<div class="stat"><div class="stat-title">Monthly Commission</div><div id="dashCommission" class="stat-value">₦0</div></div>
+<div class="stat"><div class="stat-title">Balance</div><div id="dashBalance" class="stat-value">₦0</div></div>
+<div class="stat"><div class="stat-title">Account Number</div><div id="dashAccount" class="stat-value">---</div></div>
+</div>
+<div class="section-title">Plan Schedule</div>
+<p id="planStatus" class="note">Your plan is active for this month.</p>
+<button id="changePlanBtn" class="secondary">CHANGE PLAN NEXT MONTH</button>
+<button id="depositBtn" class="secondary">DEPOSIT</button>
+<button id="logoutBtn" class="primary">LOGOUT</button>
+</section>
 
 <div id="msg" class="msg"></div>
 </div>
@@ -122,7 +159,119 @@ $("loginTab").classList.remove("active");
 $("createPanel").classList.remove("hidden");
 $("loginPanel").classList.add("hidden");
 $("msg").className="msg";
-if(!$("regCard").value) await generateCard();
+if(!$("regCard").value) await 
+let currentUser=null;
+let currentAccount=null;
+let selectedPlan=null;
+let planStartedAt=null;
+let nextPlanChangeAt=null;
+
+function money(n){return "₦"+Number(n||0).toLocaleString("en-NG");}
+
+function showOnly(id){
+  ["createPanel","loginPanel","planPanel","dashboardPanel"].forEach(x=>{
+    $(x).classList.toggle("hidden",x!==id);
+  });
+  $("msg").className="msg";
+}
+
+function firstDayNextMonth(d){
+  return new Date(d.getFullYear(),d.getMonth()+1,1,0,0,0);
+}
+
+function dateText(d){
+  return d.toLocaleDateString("en-NG",{day:"numeric",month:"long",year:"numeric"});
+}
+
+function openPlanScreen(){
+  showOnly("planPanel");
+  selectedPlan=null;
+  document.querySelectorAll(".plan-option").forEach(x=>x.classList.remove("selected"));
+  $("continuePlanBtn").disabled=true;
+}
+
+async function saveNewPlan(amount){
+  if(!currentUser) throw new Error("Please login again.");
+
+  const now=new Date();
+  const next=firstDayNextMonth(now);
+
+  const {error}=await db.from("customers").update({
+    daily_contribution:Number(amount),
+    plan_started_at:now.toISOString(),
+    plan_next_change_at:next.toISOString()
+  }).eq("auth_user_id",currentUser.id);
+
+  if(error) throw error;
+
+  planStartedAt=now;
+  nextPlanChangeAt=next;
+}
+
+function openDashboard(amount){
+  showOnly("dashboardPanel");
+  $("dashDaily").textContent=money(amount);
+  $("dashCommission").textContent=money(amount);
+  $("dashBalance").textContent="₦0";
+  $("dashAccount").textContent=currentAccount||"---";
+
+  const now=new Date();
+  const changeDate=nextPlanChangeAt || firstDayNextMonth(now);
+  $("planStatus").textContent=
+    "Current plan: "+money(amount)+" per day. You can change your plan from "+dateText(changeDate)+".";
+
+  $("changePlanBtn").disabled = now < changeDate;
+  $("changePlanBtn").textContent =
+    now < changeDate ? "CHANGE PLAN NEXT MONTH" : "CHANGE CONTRIBUTION PLAN";
+}
+
+document.querySelectorAll(".plan-option").forEach(btn=>{
+  btn.onclick=function(){
+    selectedPlan=Number(btn.dataset.amount);
+    document.querySelectorAll(".plan-option").forEach(x=>x.classList.remove("selected"));
+    btn.classList.add("selected");
+    $("continuePlanBtn").disabled=false;
+  };
+});
+
+$("continuePlanBtn").onclick=async function(){
+  if(!selectedPlan||!currentUser)return;
+  $("continuePlanBtn").disabled=true;
+  $("continuePlanBtn").textContent="SAVING PLAN...";
+  try{
+    await saveNewPlan(selectedPlan);
+    openDashboard(selectedPlan);
+  }catch(error){
+    console.error(error);
+    show(error.message||"Could not save your contribution plan.");
+  }finally{
+    $("continuePlanBtn").disabled=false;
+    $("continuePlanBtn").textContent="CONTINUE TO DASHBOARD";
+  }
+};
+
+$("changePlanBtn").onclick=function(){
+  const now=new Date();
+  const changeDate=nextPlanChangeAt || firstDayNextMonth(now);
+  if(now < changeDate){
+    show("Your current plan cannot be changed until "+dateText(changeDate)+".");
+    return;
+  }
+  openPlanScreen();
+};
+
+$("logoutBtn").onclick=async function(){
+  await db.auth.signOut();
+  currentUser=null;
+  currentAccount=null;
+  showOnly("loginPanel");
+};
+
+$("depositBtn").onclick=function(){
+  show("Deposit will be connected next.",true);
+};
+
+generateCard();
 };
 
 $("loginTab").onclick=function(){
@@ -183,12 +332,10 @@ show("Account created successfully. Your account number is "+card+". Please chec
 return;
 }
 
-show("Account created successfully! Your account number is "+card+".",true);
-
-setTimeout(function(){
-$("loginTab").click();
-$("loginCard").value=card;
-},1200);
+currentUser=data.user;
+currentAccount=card;
+show("Account created successfully. Now choose your contribution plan.",true);
+setTimeout(openPlanScreen,500);
 
 }catch(error){
 console.error(error);
@@ -224,7 +371,10 @@ const {data,error}=await db.auth.signInWithPassword({email:email,password:passwo
 if(error) throw error;
 if(!data.user) throw new Error("Login failed.");
 
-show("Login successful. Welcome to AGADA!",true);
+currentUser=data.user;
+currentAccount=card;
+show("Login successful. Choose your contribution plan.",true);
+setTimeout(openPlanScreen,500);
 }catch(error){
 console.error(error);
 show(error.message||"Login failed.");
