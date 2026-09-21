@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AGADA Customer Portal</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,sans-serif;background:#f6f3f5;color:#241923}
+.wrap{max-width:460px;margin:auto;padding:24px}
+.logo{text-align:center;color:#a90062;font-size:42px;font-weight:800;margin-top:25px}
+.sub{text-align:center;color:#555;margin-bottom:25px}
+.card{background:#fff;border-radius:22px;padding:25px;box-shadow:0 8px 30px #0001}
+.tabs{display:flex;gap:8px;margin-bottom:22px}
+.tabs button{flex:1;padding:13px;border:0;border-radius:10px;font-weight:bold;background:#eee}
+.tabs .active{background:#a90062;color:#fff}
+h2{margin-top:0}
+label{display:block;font-weight:bold;margin:15px 0 7px}
+input{width:100%;height:52px;border:1px solid #ccc;border-radius:11px;padding:0 14px;font-size:16px}
+input[readonly]{background:#f2f2f2;font-weight:bold;letter-spacing:2px;text-align:center}
+button.primary,button.secondary{width:100%;height:54px;margin-top:22px;border-radius:11px;font-size:17px;font-weight:bold}
+.primary{border:0;background:#a90062;color:#fff}
+.secondary{border:1px solid #a90062;background:#fff;color:#a90062}
+button:disabled{opacity:.6}
+.note{font-size:14px;color:#666;line-height:1.5}
+.hidden{display:none}
+.msg{margin-top:15px;padding:12px;border-radius:10px;display:none;white-space:pre-wrap}
+.error{display:block;background:#fff0f2;color:#a00020}
+.success{display:block;background:#effaf3;color:#126b38}
+.gen-note{text-align:center;font-size:13px;color:#777;margin-top:7px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="logo">AGADA</div>
+<div class="sub">Daily Contribution Customer Portal</div>
+<div class="card">
+
+<div class="tabs">
+<button id="createTab" class="active" type="button">Create Account</button>
+<button id="loginTab" type="button">Login</button>
+</div>
+
+<section id="createPanel">
+<h2>Create Customer Account</h2>
+<p class="note">Your account/card number is generated automatically by Agada. You cannot choose or change the number.</p>
+
+<label>Full Name</label>
+<input id="regName" placeholder="Full name">
+
+<label>Phone Number</label>
+<input id="regPhone" type="tel" placeholder="Phone number">
+
+<label>Email Address</label>
+<input id="regEmail" type="email" placeholder="Email address">
+
+<label>Account / Card Number</label>
+<input id="regCard" inputmode="numeric" maxlength="3" readonly placeholder="Generating...">
+<div class="gen-note">Automatically generated unique 3-digit number</div>
+
+<label>Password</label>
+<input id="regPassword" type="password" placeholder="Create password">
+
+<label>Confirm Password</label>
+<input id="regConfirm" type="password" placeholder="Confirm password">
+
+<button id="createBtn" class="primary" type="button">CREATE ACCOUNT</button>
+</section>
+
+<section id="loginPanel" class="hidden">
+<h2>Customer Login</h2>
+
+<label>Account / Card Number</label>
+<input id="loginCard" inputmode="numeric" maxlength="3" placeholder="e.g. 244">
+
+<label>Password</label>
+<input id="loginPassword" type="password" placeholder="Password">
+
+<button id="loginBtn" class="primary" type="button">LOGIN</button>
+<button id="forgotBtn" class="secondary" type="button">FORGOT PASSWORD</button>
+</section>
+
+<div id="msg" class="msg"></div>
+</div>
+</div>
+
+<script>
+const SUPABASE_URL = "https://pijuxtwktpjoiougccod.supabase.co";
+const SUPABASE_KEY = "sb_publishable_ZF-CV-zjE1qXg5hc2HeJhg_wXToYSm2";
+
+let db = null;
+
+const $ = id => document.getElementById(id);
+
+function show(text, ok=false){
+  const x = $("msg");
+  x.textContent = text || "";
+  x.className = "msg " + (ok ? "success" : "error");
+}
+
+function clearMessage(){
+  $("msg").className = "msg";
+  $("msg").textContent = "";
+}
+
+function loadSupabase(){
+  return new Promise((resolve,reject)=>{
+    if(window.supabase){
+      resolve();
+      return;
+    }
+
+    const urls = [
+      "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2",
+      "https://unpkg.com/@supabase/supabase-js@2"
+    ];
+
+    let i = 0;
+
+    function tryNext(){
+      if(window.supabase){
+        resolve();
+        return;
+      }
+
+      if(i >= urls.length){
+        reject(new Error("Supabase library could not load. Check your internet connection and reload the page."));
+        return;
+      }
+
+      const s = document.createElement("script");
+      s.src = urls[i++];
+      s.onload = () => window.supabase ? resolve() : tryNext();
+      s.onerror = tryNext;
+      document.head.appendChild(s);
+    }
+
+    tryNext();
+  });
+}
+
+async function generateCard(){
+  if(!db) return false;
+
+  $("regCard").value = "";
+  $("regCard").placeholder = "Generating...";
+
+  const {data,error} = await db.rpc("generate_customer_account_number");
+
+  if(error){
+    show("Account number error: " + error.message);
+    $("regCard").placeholder = "Generation failed";
+    return false;
+  }
+
+  if(!data || !/^\d{3}$/.test(String(data))){
+    show("Agada returned an invalid account number.");
+    return false;
+  }
+
+  $("regCard").value = String(data);
+  $("regCard").placeholder = "";
+  return true;
+}
+
+function showCreate(){
+  $("createTab").classList.add("active");
+  $("loginTab").classList.remove("active");
+  $("createPanel").classList.remove("hidden");
+  $("loginPanel").classList.add("hidden");
+  clearMessage();
+
+  if(!$("regCard").value) generateCard();
+}
+
+function showLogin(){
+  $("loginTab").classList.add("active");
+  $("createTab").classList.remove("active");
+  $("loginPanel").classList.remove("hidden");
+  $("createPanel").classList.add("hidden");
+  clearMessage();
+}
+
+async function createAccount(){
+  const name = $("regName").value.trim();
+  const phone = $("regPhone").value.trim();
+  const email = $("regEmail").value.trim();
+  const card = $("regCard").value.trim();
+  const pass = $("regPassword").value;
+  const confirm = $("regConfirm").value;
+
+  if(!name || !phone || !email || !card || !pass || !confirm){
+    show("Please fill in every field.");
+    return;
+  }
+
+  if(!/^\d{3}$/.test(card)){
+    show("Account/Card Number is not ready yet. Please wait a moment.");
+    return;
+  }
+
+  if(pass.length < 6){
+    show("Password must be at least 6 characters.");
+    return;
+  }
+
+  if(pass !== confirm){
+    show("Passwords do not match.");
+    return;
+  }
+
+  $("createBtn").disabled = true;
+  $("createBtn").textContent = "CREATING...";
+
+  try{
+    const {data,error} = await db.auth.signUp({
+      email: email,
+      password: pass,
+      options: {
+        data: {
+          full_name: name,
+          phone_number: phone,
+          account_number: card
+        }
+      }
+    });
+
+    if(error) throw error;
+    if(!data || !data.user) throw new Error("Registration did not return a user.");
+
+    if(data.session){
+      show("Account created successfully. Your account/card number is " + card + ". You can now login.", true);
+      setTimeout(()=>{
+        showLogin();
+        $("loginCard").value = card;
+      },1000);
+    }else{
+      show("Account created. Check your email to confirm the account. Your account/card number is " + card + ".", true);
+    }
+
+  }catch(e){
+    console.error(e);
+    show(e.message || "Registration failed.");
+  }finally{
+    $("createBtn").disabled = false;
+    $("createBtn").textContent = "CREATE ACCOUNT";
+  }
+}
+
+async function login(){
+  const card = $("loginCard").value.trim();
+  const pass = $("loginPassword").value;
+
+  if(!/^\d{3}$/.test(card)){
+    show("Enter your 3-digit account/card number.");
+    return;
+  }
+
+  if(!pass){
+    show("Enter your password.");
+    return;
+  }
+
+  $("loginBtn").disabled = true;
+  $("loginBtn").textContent = "LOGGING IN...";
+
+  try{
+    const {data:email,error:rpcError} = await db.rpc(
+      "get_customer_email",
+      {p_account_number: card}
+    );
+
+    if(rpcError) throw rpcError;
+    if(!email) throw new Error("Account not found. Contact Agada Admin.");
+
+    const {data,error} = await db.auth.signInWithPassword({
+      email: email,
+      password: pass
+    });
+
+    if(error) throw error;
+    if(!data || !data.user) throw new Error("Login failed.");
+
+    show("Login successful.", true);
+
+  }catch(e){
+    console.error(e);
+    show(e.message || "Login failed.");
+  }finally{
+    $("loginBtn").disabled = false;
+    $("loginBtn").textContent = "LOGIN";
+  }
+}
+
+async function forgotPassword(){
+  const card = $("loginCard").value.trim();
+
+  if(!/^\d{3}$/.test(card)){
+    show("Enter your 3-digit account/card number first.");
+    return;
+  }
+
+  $("forgotBtn").disabled = true;
+  $("forgotBtn").textContent = "SENDING...";
+
+  try{
+    const {data:email,error:rpcError} = await db.rpc(
+      "get_customer_email",
+      {p_account_number: card}
+    );
+
+    if(rpcError) throw rpcError;
+    if(!email) throw new Error("Account not found.");
+
+    const {error} = await db.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin + window.location.pathname
+    });
+
+    if(error) throw error;
+
+    show("Password reset instructions were sent to the customer's email.", true);
+
+  }catch(e){
+    show(e.message || "Password reset failed.");
+  }finally{
+    $("forgotBtn").disabled = false;
+    $("forgotBtn").textContent = "FORGOT PASSWORD";
+  }
+}
+
+async function start(){
+  try{
+    await loadSupabase();
+    db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    $("createTab").addEventListener("click", showCreate);
+    $("loginTab").addEventListener("click", showLogin);
+    $("createBtn").addEventListener("click", createAccount);
+    $("loginBtn").addEventListener("click", login);
+    $("forgotBtn").addEventListener("click", forgotPassword);
+
+    await generateCard();
+
+  }catch(e){
+    console.error(e);
+    show(e.message || "The customer portal could not start.");
+  }
+}
+
+start();
+</script>
+</body>
+</html>
